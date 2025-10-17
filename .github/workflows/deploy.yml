@@ -1,0 +1,58 @@
+# .github/workflows/deploy.yml
+name: Deploy to Azure
+
+# This workflow runs on every push to the "main" branch
+on:
+  push:
+    branches: [ "main" ]
+
+# Environment variables to make the workflow cleaner and easier to manage
+env:
+  AZURE_RESOURCE_GROUP: "dragonball-rg"
+  AZURE_ACR_NAME: "acrdballkwhe" # Your unique ACR name
+  IMAGE_NAME: "dbz-api-fetcher"
+  CONTAINER_NAME: "dbz-job-container"
+
+jobs:
+  deploy:
+    # This job also runs on a GitHub-hosted runner
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checks out your repository code
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      # Step 2: Logs into Azure using the Service Principal credentials
+      - name: 'Login to Azure'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Step 3: Logs into your private Azure Container Registry
+      - name: 'Login to Azure Container Registry'
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.AZURE_ACR_NAME }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      # Step 4: Builds the Docker image and pushes it to your ACR
+      # We tag the image with the unique commit SHA for versioning
+      - name: 'Build and Push Docker Image to ACR'
+        run: |
+          docker build . -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # Step 5: Deploys the container to Azure Container Instances (ACI)
+      - name: 'Deploy to Azure Container Instances'
+        uses: azure/aci-deploy@v1
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          registry-login-server: ${{ env.AZURE_ACR_NAME }}.azurecr.io
+          registry-username: ${{ secrets.ACR_USERNAME }}
+          registry-password: ${{ secrets.ACR_PASSWORD }}
+          location: 'south india'
+          # This policy tells Azure to run the container once and then stop. Perfect for jobs!
+          restart-policy: 'Never'
